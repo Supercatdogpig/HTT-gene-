@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧬 HTT DNA Music Analysis System</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🧬 HTT Gene Sequence Auditory & Visualization System</h1>
+            <p class="subtitle">Transform HTT gene sequences into music and visualizations</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h2>⚙️ Settings & Files</h2>
+                    
+                    <div class="form-group">
+                        <label for="fasta-input">1. Upload DNA FASTA</label>
+                        <input type="file" id="fasta-input" accept=".fasta,.fa,.txt" required>
+                        <small>Supports multiple files</small>
+                    </div>
+
+                    <hr class="divider">
+
+                    <div class="form-group">
+                        <h3>🎵 Sound Customization (Optional)</h3>
+                        <label for="drum-audio">Custom Drum Sound (MP3/WAV)</label>
+                        <input type="file" id="drum-audio" accept=".mp3,.wav">
+                        
+                        <label for="piano-audio">Custom Piano Sound (MP3/WAV)</label>
+                        <input type="file" id="piano-audio" accept=".mp3,.wav">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="play-speed">Playback Duration per Codon (seconds)</label>
+                        <input type="range" id="play-speed" min="0.05" max="0.5" step="0.05" value="0.15">
+                        <span id="speed-display">0.15s</span>
+                    </div>
+
+                    <button id="analyze-btn" class="btn btn-primary">🚀 Analyze & Generate</button>
+                    <button id="clear-btn" class="btn btn-secondary">🗑️ Clear All</button>
+                </div>
+            </aside>
+
+            <!-- Right Content Area -->
+            <section class="content">
+                <!-- Legend -->
+                <div class="legend">
+                    <div class="legend-item">
+                        <span class="legend-color" style="background-color: #E74C3C;"></span>
+                        <span>🔴 Drum (CAG) - Huntington's Disease Marker</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background-color: #2ECC71;"></span>
+                        <span>🟢 Piano (Other codons) - Standard Genetic Code</span>
+                    </div>
+                </div>
+
+                <!-- Results Container -->
+                <div id="results-container" class="results-container">
+                    <div class="placeholder">
+                        👈 Upload a FASTA file and click "Analyze & Generate" to begin
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loading-spinner" class="spinner hidden">
+        <div class="spinner-ring"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
