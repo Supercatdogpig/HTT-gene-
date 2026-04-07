@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧬 HTT Gene Sequence Auditory & Visualization System</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .filename-display { margin-top: 6px; font-size: 0.9rem; padding: 4px 8px; border-radius: 4px; background: #f8f9fa; }
+        .clinical-box { background: #fff; padding: 20px; border-radius: 8px; border: 4px solid; margin: 20px 0; }
+        .risk-number { font-size: 2.4rem; font-weight: 700; }
+        .warning { background:#fff3cd; border:2px solid #f39c12; padding:15px; border-radius:8px; margin:15px 0; font-size:0.95rem; line-height:1.5; }
+        .current-indicator { background: #fff; border: 3px solid #e74c3c; border-radius: 12px; padding: 15px 20px; margin: 15px 0; font-size: 1.3rem; font-weight: 700; display: flex; align-items: center; gap: 15px; box-shadow: 0 4px 15px rgba(231,76,60,0.3); }
+        .demo-btn { margin-bottom: 8px !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🧬 HTT Gene Sequence Auditory & Visualization System</h1>
+            <p class="subtitle">Huntington's Disease HTT Gene CAG Repeat Analysis — Music + Visualization</p>
+        </header>
+        <main class="main-content">
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h2>⚙️ Settings & Files</h2>
+
+                    <!-- ==================== QUICK DEMO ==================== -->
+                    <div class="form-group">
+                        <h3 style="color:#27ae60; margin-bottom:12px;">🎯 Quick Demo (No upload needed)</h3>
+                        <button id="demo-normal" class="btn btn-secondary demo-btn">🟢 Normal HTT Example (21 CAG repeats)</button>
+                        <button id="demo-expanded" class="btn btn-secondary demo-btn">🔴 Expanded HTT Example (45 CAG repeats)</button>
+                    </div>
+                    <hr class="divider">
+                    <!-- ==================== END DEMO ==================== -->
+
+                    <div class="form-group">
+                        <label for="fasta-input">1. Upload DNA FASTA File</label>
+                        <input type="file" id="fasta-input" accept=".fasta,.fa,.txt">
+                    </div>
+                    <hr class="divider">
+                    <div class="form-group">
+                        <h3>🎵 Custom Sound for CAG Repeat</h3>
+                        <label for="crash-audio">Upload Custom Sound for CAG Repeat (crash)</label>
+                        <input type="file" id="crash-audio" accept=".mp3,.wav">
+                        <div id="crash-filename" class="filename-display"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="play-speed">Playback duration per codon (seconds)</label>
+                        <input type="range" id="play-speed" min="0.05" max="0.5" step="0.01" value="0.15">
+                        <span id="speed-display">0.15s</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="bpm">🎛️ BPM (Tempo) — Overall rhythm speed</label>
+                        <input type="range" id="bpm" min="60" max="180" step="1" value="120">
+                        <span id="bpm-display" style="margin-left:10px; font-weight:600; color:#e74c3c;">120 BPM</span>
+                    </div>
+                    <button id="analyze-btn" class="btn btn-primary">🚀 Analyze & Generate Music</button>
+                    <button id="clear-btn" class="btn btn-secondary">🗑️ Clear All</button>
+                </div>
+            </aside>
+            <section class="content">
+                <div class="legend">
+                    <div class="legend-item"><span class="legend-color" style="background:#E74C3C;"></span><span>🔴 CAG</span></div>
+                    <div class="legend-item"><span class="legend-color" style="background:#2ECC71;"></span><span>🟢 Other codons</span></div>
+                </div>
+                <div id="results-container" class="results-container"></div>
+            </section>
+        </main>
+    </div>
+    <div id="loading-spinner" class="spinner hidden"><div class="spinner-ring"></div></div>
+
+    <script>
+        let audioContext = null;
+        let crashBuffer = null;
+        let plotDivId = 'plot-0';
+        let currentPlaySpeed = 0.15;
+
+        document.addEventListener('click', () => {
+            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }, { once: true });
+
+        async function loadCustomAudio(file) {
+            if (!file) return null;
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const decoded = await audioContext.decodeAudioData(arrayBuffer);
+                const el = document.getElementById('crash-filename');
+                el.innerHTML = `✅ ${file.name} <small>(${(file.size/1024/1024).toFixed(2)}MB)</small>`;
+                return decoded;
+            } catch (e) {
+                alert(`❌ Failed to load custom crash sound`);
+                return null;
+            }
+        }
+        document.getElementById('crash-audio').addEventListener('change', async e => {
+            crashBuffer = await loadCustomAudio(e.target.files[0]);
+        });
+
+        function parseFasta(text) {
+            const lines = text.trim().split('\n');
+            let name = '', sequence = '';
+            for (const line of lines) {
+                const t = line.trim();
+                if (t.startsWith('>')) name = t.substring(1).split(/\s+/)[0] || 'Sequence';
+                else if (t) sequence += t.replace(/\s/g, '').toUpperCase();
+            }
+            return { name, sequence };
+        }
+
+        function analyzeSequence(name, sequence) {
+            const clean = sequence.replace(/[^ATCG]/gi, '').toUpperCase();
+            const codons = [], types = [];
+            let cagTotal = 0;
+            for (let i = 0; i < clean.length - 2; i += 3) {
+                const codon = clean.substring(i, i + 3);
+                if (codon.length === 3) {
+                    codons.push(codon);
+                    if (codon === 'CAG') { types.push(1); cagTotal++; } else types.push(0);
+                }
+            }
+            let longest = 0, current = 0, longestStart = 0;
+            for (let i = 0; i < types.length; i++) {
+                if (types[i] === 1) {
+                    current++;
+                    if (current > longest) {
+                        longest = current;
+                        longestStart = i - current + 1;
+                    }
+                } else current = 0;
+            }
+            let riskLevel = '', riskColor = '#2ecc71';
+            if (longest <= 26) riskLevel = 'Normal';
+            else if (longest <= 35) { riskLevel = 'Intermediate'; riskColor = '#f1c40f'; }
+            else if (longest <= 39) { riskLevel = 'Reduced Penetrance'; riskColor = '#e67e22'; }
+            else { riskLevel = 'Full Penetrance (High Risk)'; riskColor = '#e74c3c'; }
+            return {
+                name,
+                codon_count: codons.length,
+                cag_count: cagTotal,
+                longest_cag_repeat: longest,
+                longest_start_index: longestStart,
+                risk_level: riskLevel,
+                risk_color: riskColor,
+                codons,
+                types
+            };
+        }
+
+        // ==================== DEMO SEQUENCES ====================
+        const demoSequences = {
+            normal: {
+                name: "HTT_Normal_Exon1_Demo",
+                sequence: "ATG" + "CAG".repeat(21) + "GCTGCCCGGGATTACTGGCCC"
+            },
+            expanded: {
+                name: "HTT_Expanded_Exon1_Demo",
+                sequence: "ATG" + "CAG".repeat(45) + "GCTGCCCGGGATTACTGGCCC"
+            }
+        };
+
+        function loadDemo(type) {
+            document.getElementById('loading-spinner').classList.remove('hidden');
+            const demo = demoSequences[type];
+            const result = analyzeSequence(demo.name, demo.sequence);
+            displayResults(result).then(() => {
+                document.getElementById('loading-spinner').classList.add('hidden');
+            });
+        }
+
+        async function generateCustomMixedBuffer(types, playSpeed) {
+            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const sampleRate = audioContext.sampleRate;
+            const totalFrames = Math.ceil(sampleRate * playSpeed * types.length);
+            const buffer = audioContext.createBuffer(1, totalFrames, sampleRate);
+            const data = buffer.getChannelData(0);
+            const framesPerCodon = Math.ceil(sampleRate * playSpeed);
+            const musicalScale = [261.63, 293.66, 311.13, 349.23, 392.00, 415.30, 466.16];
+            for (let i = 0; i < types.length; i++) {
+                const isCAG = types[i] === 1;
+                const offset = i * framesPerCodon;
+                if (isCAG) {
+                    const vol = 0.98;
+                    if (crashBuffer) {
+                        const srcData = crashBuffer.getChannelData(0);
+                        for (let j = 0; j < framesPerCodon && (offset + j) < totalFrames; j++) {
+                            const sample = srcData[j % srcData.length] || 0;
+                            const envelope = Math.exp(-j / (framesPerCodon * 0.25));
+                            data[offset + j] += sample * vol * envelope;
+                        }
+                    } else {
+                        const crashLength = Math.min(framesPerCodon * 3, 90000);
+                        for (let j = 0; j < crashLength && (offset + j) < totalFrames; j++) {
+                            const t = j / sampleRate;
+                            const noise = Math.random() * 2 - 1;
+                            const envelope = Math.exp(-t * 4.5);
+                            const highFreqBoost = Math.sin(2 * Math.PI * t * 2800);
+                            data[offset + j] += noise * envelope * (0.9 + highFreqBoost * 0.3) * vol;
+                        }
+                    }
+                } else {
+                    const noteIndex = (i * 2) % musicalScale.length;
+                    const freq = musicalScale[noteIndex] * (1 + (i % 5) * 0.08);
+                    const vol = 0.72;
+                    for (let j = 0; j < framesPerCodon && (offset + j) < totalFrames; j++) {
+                        const phase = ((offset + j) * freq * 2 * Math.PI) / sampleRate;
+                        const envelope = 1 - (j / framesPerCodon) * 0.6;
+                        data[offset + j] += Math.sin(phase) * 0.32 * envelope * vol;
+                    }
+                }
+                if (i % 4 === 0) {
+                    const kickOffset = offset;
+                    const kickLength = Math.min(framesPerCodon * 0.6, 14000);
+                    for (let j = 0; j < kickLength && (kickOffset + j) < totalFrames; j++) {
+                        const t = j / sampleRate;
+                        const kickFreq = 160 - t * 480;
+                        const kick = Math.sin(2 * Math.PI * kickFreq * t) * Math.exp(-t * 11);
+                        data[kickOffset + j] += kick * 1.4;
+                    }
+                }
+                if (i % 2 === 1) {
+                    const hatOffset = offset + Math.floor(framesPerCodon * 0.5);
+                    const hatLength = Math.min(framesPerCodon * 0.22, 3500);
+                    for (let j = 0; j < hatLength && (hatOffset + j) < totalFrames; j++) {
+                        const noise = (Math.random() * 2 - 1);
+                        const envelope = Math.exp(-j / (hatLength * 1.1));
+                        data[hatOffset + j] += noise * 0.22 * envelope;
+                    }
+                }
+            }
+            return buffer;
+        }
+
+        function audioBufferToWav(buffer) {
+            const length = buffer.length * 2 + 44;
+            const arrayBuffer = new ArrayBuffer(length);
+            const view = new DataView(arrayBuffer);
+            const writeString = (offset, str) => {
+                for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + buffer.length * 2, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, buffer.sampleRate, true);
+            view.setUint32(28, buffer.sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, buffer.length * 2, true);
+            let offset = 44;
+            for (let i = 0; i < buffer.length; i++) {
+                const sample = Math.max(-1, Math.min(1, buffer.getChannelData(0)[i]));
+                view.setInt16(offset, sample * 0x7FFF * 0.8, true);
+                offset += 2;
+            }
+            return URL.createObjectURL(new Blob([arrayBuffer], {type: 'audio/wav'}));
+        }
+
+        async function displayResults(result) {
+            const speed = currentPlaySpeed;
+            const audioBuffer = await generateCustomMixedBuffer(result.types, speed);
+            result.audio = audioBufferToWav(audioBuffer);
+            const html = `
+                <div class="result-card">
+                    <h2>📊 ${result.name}</h2>
+                    <div class="clinical-box" style="border-color:${result.risk_color}">
+                        <h3 style="color:${result.risk_color}">🧬 Clinical Key Indicators (No exon 1 cutting)</h3>
+                        <p><strong>Longest consecutive CAG repeat:</strong> <span class="risk-number" style="color:${result.risk_color}">${result.longest_cag_repeat} repeats</span></p>
+                        <p><strong>Total CAG codons:</strong> <span style="color:#3498db;font-weight:700">${result.cag_count}</span></p>
+                        <p><strong>Risk level:</strong> <span style="color:${result.risk_color};font-weight:700">${result.risk_level}</span></p>
+                        <div class="warning">
+                            ⚠️ This version analyzes the entire sequence without cutting.<br>
+                            If your file contains full HTT gene (not only exon 1), the number may be higher than clinical exon 1 values.
+                        </div>
+                    </div>
+                    <div class="audio-player">
+                        <audio id="main-audio" controls style="flex:1; min-width:300px;">
+                            <source src="${result.audio}" type="audio/wav">
+                        </audio>
+                        <button class="btn-download" onclick="downloadAudio('${result.name}', '${result.audio}')">⬇️ Download WAV</button>
+                    </div>
+                    <div class="chart-container">
+                        <h4>🎨 Codon Visualization (Red indicator moves with music)</h4>
+                        <div id="${plotDivId}" style="height:380px"></div>
+                        <div id="current-indicator" class="current-indicator">
+                            <span>🔴</span>
+                            <div>Now playing: <span id="current-codon-text" style="color:#e74c3c;">Codon 0</span></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('results-container').innerHTML = html;
+            const audio = document.getElementById('main-audio');
+            const colors = result.types.map((t, i) =>
+                (i >= result.longest_start_index && i < result.longest_start_index + result.longest_cag_repeat)
+                ? '#c0392b' : (t === 1 ? '#E74C3C' : '#2ECC71')
+            );
+            Plotly.newPlot(plotDivId, [{
+                x: Array.from({length: result.codon_count}, (_,i) => i),
+                y: Array(result.codon_count).fill(1),
+                type: 'bar',
+                marker: { color: colors },
+                customdata: result.codons
+            }], {
+                height: 380,
+                xaxis: {title: 'Codon Position'},
+                yaxis: {visible: false}
+            }, {responsive: true});
+            audio.ontimeupdate = () => {
+                if (!audio.duration) return;
+                const progress = audio.currentTime / audio.duration;
+                const currentIndex = Math.floor(progress * result.codon_count);
+                document.getElementById('current-codon-text').textContent = `Codon ${currentIndex + 1} (${result.codons[currentIndex]})`;
+                const highlightColors = [...colors];
+                if (currentIndex >= 0 && currentIndex < result.codon_count) highlightColors[currentIndex] = '#ff0000';
+                Plotly.restyle(plotDivId, {marker: {color: highlightColors}}, [0]);
+            };
+            audio.onended = () => {
+                document.getElementById('current-codon-text').textContent = 'Playback finished';
+                Plotly.restyle(plotDivId, {marker: {color: colors}}, [0]);
+            };
+        }
+
+        function downloadAudio(name, url) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${name}_HTT_music.wav`;
+            a.click();
+        }
+
+        // ====================== buttom effect ======================
+        document.getElementById('analyze-btn').addEventListener('click', async () => {
+            const fastaInput = document.getElementById('fasta-input');
+            if (!fastaInput.files.length) return alert('Please upload a FASTA file or use Quick Demo!');
+            document.getElementById('loading-spinner').classList.remove('hidden');
+            document.getElementById('analyze-btn').disabled = true;
+            try {
+                const file = fastaInput.files[0];
+                const text = await file.text();
+                const {name, sequence} = parseFasta(text);
+                const result = analyzeSequence(name, sequence);
+                await displayResults(result);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                document.getElementById('loading-spinner').classList.add('hidden');
+                document.getElementById('analyze-btn').disabled = false;
+            }
+        });
+
+        // ====================== DEMO buttom ======================
+        document.getElementById('demo-normal').addEventListener('click', () => loadDemo('normal'));
+        document.getElementById('demo-expanded').addEventListener('click', () => loadDemo('expanded'));
+
+        document.getElementById('clear-btn').addEventListener('click', () => location.reload());
+
+        // ====================== real-time updates ======================
+        const speedSlider = document.getElementById('play-speed');
+        const speedDisplay = document.getElementById('speed-display');
+        speedSlider.addEventListener('input', () => {
+            currentPlaySpeed = parseFloat(speedSlider.value);
+            speedDisplay.textContent = currentPlaySpeed.toFixed(2) + 's';
+        });
+
+        const bpmSlider = document.getElementById('bpm');
+        const bpmDisplay = document.getElementById('bpm-display');
+        bpmSlider.addEventListener('input', () => {
+            bpmDisplay.textContent = `${bpmSlider.value} BPM`;
+        });
+
+        console.log('%c✅ HTT Sonification System + Quick Demo loaded!', 'color:#2ecc71;font-size:16px');
+    </script>
+</body>
+</html>
